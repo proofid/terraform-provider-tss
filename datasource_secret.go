@@ -67,8 +67,8 @@ func dataSourceSecret() *schema.Resource {
 			},
 			"path": {
 				Description: "the fully-qualified path to the secret including its folder path and secret name, " +
-					"eg: '/my/folder/structure/secretName'. Either path or id must be set, and if both are set, " +
-					"id wins.",
+					"eg: '/my/folder/structure/secretName'. Either path or id must be set, and if both are " +
+					"set, id wins.",
 				Optional: true,
 				Type:     schema.TypeString,
 			},
