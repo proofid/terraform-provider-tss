@@ -11,6 +11,7 @@ import (
 
 func dataSourceSecretRead(d *schema.ResourceData, meta interface{}) error {
 	id := d.Get("id").(int)
+	path := d.Get("path").(string)
 	field := d.Get("field").(string)
 	secrets, err := server.New(meta.(server.Configuration))
 
@@ -19,7 +20,12 @@ func dataSourceSecretRead(d *schema.ResourceData, meta interface{}) error {
 	}
 	log.Printf("[DEBUG] getting secret with id %d", id)
 
-	secret, err := secrets.Secret(id)
+	var secret *server.Secret
+	if id != 0 {
+		secret, err = secrets.Secret(id)
+	} else {
+		secret, err = secrets.SecretByPath(path)
+	}
 
 	if err != nil {
 		log.Print("[DEBUG] unable to get secret", err)
@@ -54,9 +60,17 @@ func dataSourceSecret() *schema.Resource {
 				Type:        schema.TypeString,
 			},
 			"id": {
-				Description: "the id of the secret",
-				Required:    true,
+				Description: "the numerical id of the secret. Either path or id must be set, and if both are set, " +
+					"id wins.",
+				Optional:    true,
 				Type:        schema.TypeInt,
+			},
+			"path": {
+				Description: "the fully-qualified path to the secret including its folder path and secret name, " +
+					"eg: '/my/folder/structure/secretName'. Either path or id must be set, and if both are set, " +
+					"id wins.",
+				Optional:    true,
+				Type:        schema.TypeString,
 			},
 		},
 	}

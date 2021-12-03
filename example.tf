@@ -21,6 +21,10 @@ variable "tss_server_url" {
 }
 
 variable "tss_secret_id" {
+  type = number
+}
+
+variable "tss_secret_path" {
   type = string
 }
 
@@ -36,7 +40,7 @@ data "tss_secret" "my_username" {
 }
 
 data "tss_secret" "my_password" {
-  id    = var.tss_secret_id
+  path  = var.tss_secret_path
   field = "password"
 }
 
