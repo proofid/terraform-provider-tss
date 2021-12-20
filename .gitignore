@@ -26,6 +26,7 @@
 
 # IDE
 .vscode
+.idea
 
 # terraform
 .terraform/

@@ -18,6 +18,10 @@ func providerConfig(d *schema.ResourceData) (interface{}, error) {
 // Provider is a Terraform DataSource
 func Provider() *schema.Provider {
 	return &schema.Provider{
+		ResourcesMap: map[string]*schema.Resource{
+			"tss_generated_password": resourceGeneratedPassword(),
+			"tss_secret":             resourceSecret(),
+		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"tss_secret": dataSourceSecret(),
 		},
