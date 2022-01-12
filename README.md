@@ -68,7 +68,7 @@ terraform {
 
 To run the example, create a `terraform.tfvars`:
 
-```json
+```terraform
 tss_username   = "my_app_user"
 tss_password   = "Passw0rd."
 tss_server_url = "https://example/SecretServer"
@@ -125,26 +125,67 @@ resource "tss_secret" "new_secret" {
 }
 ```
 
+The following is an example of how to declare a Secret Resource that relies on
+the Thycotic server to generate its SSH public/private key pair:
+
+```terraform
+resource "tss_secret" "ssh_keys" {
+  name = "SSH Keys Managed by Terraform"
+  secret_template_id = 6026
+  folder_id = 6
+  generate_ssh_keys = true
+  generate_ssh_passphrase = true
+  item {
+    field = "public-key"
+    filename = "ssh-credentials.pub"
+  }
+  item {
+    field = "private-key"
+    filename = "ssh-credentials.pem" 
+  }
+  item {
+    field = "private-key-passphrase"
+  }
+}
+
+output "public_key" {
+  value     = tss_secret.ssh_keys.item[0].value
+}
+
+output "private_key" {
+  value     = tss_secret.ssh_keys.item[1].value
+  sensitive = true
+}
+
+output "passphrase_protecting_private_key" {
+  value     = tss_secret.ssh_keys.item[2].value
+  sensitive = true
+}
+```
+
+
 Below are the attributes you'll most likely use for the Secret Resource. Other 
 attributes are described in the schema at the bottom of `resource_secret.go`:
 
-| Attribute Name     | Attribute Type | Usage    | Description                                                                                                                                                                                                                                             |
-|--------------------|----------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| name               | String         | Required | A display name for the secret in the Thycotic web interface.                                                                                                                                                                                            |
-| secret_template_id | Integer        | Required | The numerical ID of the template that defines what fields are available on the secret.                                                                                                                                                                                 |
-| folder_id          | Integer        | Optional | The numerical ID of the folder that contains the secret. If a folder ID is not provided, the secret will be kept in the root folder. The user in the provider configuration must have permissions to write to this folder for the operation to succeed. |
-| item               | Block          | Required | One or more items that populate the fields defined in the secret's template. The item structure is described in the following table.                                                                                                                    |
+| Attribute Name          | Attribute Type | Usage    | Description                                                                                                                                                                                                                                                                                                         |
+|-------------------------|----------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| name                    | String         | Required | A display name for the secret in the Thycotic web interface.                                                                                                                                                                                                                                                        |
+| secret_template_id      | Integer        | Required | The numerical ID of the template that defines what fields are available on the secret.                                                                                                                                                                                                                              |
+| folder_id               | Integer        | Optional | The numerical ID of the folder that contains the secret. If a folder ID is not provided, the secret will be kept in the root folder. The user in the provider configuration must have permissions to write to this folder for the operation to succeed.                                                             |
+| generate_ssh_keys       | Boolean        | Optional | Whether to generate an SSH public/private key pair for the secret. If true, the template for this secret must have extended mappings that support SSH keys. Also, the `item` `value` for the mapped file fields must be undeclared or empty in this configuration.                                                  |
+| generate_ssh_passphrase | Boolean        | Optional | Whether to generate a passphrase to protect the SSH private key. If true, `generate_ssh_keys` must also be true, and the template for this secret must have extended mappings that support SSH keys. Finally, the `item` `value` for the mapped passphrase field must be undeclared or empty in this configuration. |
+| item                    | Block          | Required | One or more items that populate the fields defined in the secret's template. The item structure is described in the following table.                                                                                                                                                                                |
 
 Below are the attributes on each `item` block that you're most likely to use for
 the Secret Resource. Other attributes are described in the schema at the bottom 
 of `resource_secret.go`:
 
-| Attribute Name | Attribute Type     | Usage    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-|----------------|--------------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| field          | String             | Required | The name of the secret field that corresponds to this item. The field name is also known as the field 'slug' in the Thycotic API. The template for the secret defines what field names are available for the secret, as well as the type for each field (eg: text, note, password, file, list, etc.)                                                                                                                                                          |
-| value          | String (Sensitive) | Required | The value for the field. If this item is a file item, you may provide the contents of the file here directly as plain text, or you may use one of the Terraform functions to read in the contents of a file on disk, such as `file("/some/file/path.txt")` or `filebase64("/some/file/path.txt")`. **WARNING**: Although this is a sensitive field and is masked in the Terraform CLI output, know that this value is available in plaintext in the Terraform state file.                                                                                                                                                           |
-| filename       | String             | Optional | The name to give a file when it is uploaded to the Thycotic server. Default value is `File.txt` if a name is not provided. This attribute is ignored if the field is not a file field.                                                                                                                                                                                                                                                                        |
-| file_encoded   | Boolean            | Optional | Whether the contents of the file attachment have been Base64 encoded and should therefore be decoded by this plugin before posting the file contents to the Thycotic Secret Server. You should set this to `true` if you're using the Terraform `filebase64()` function to read in the contents of a file that is _not_ UTF-8 encoded, which is a requirement for the Terraform `file()` function. This attribute is ignored if this item is not a file item. |
+| Attribute Name | Attribute Type     | Usage    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|----------------|--------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| field          | String             | Required | The name of the secret field that corresponds to this item. The field name is also known as the field 'slug' in the Thycotic API. The template for the secret defines what field names are available for the secret, as well as the type for each field (eg: text, note, password, file, list, etc.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| value          | String (Sensitive) | Optional | The value for the field. If this item is a file item, you may provide the contents of the file here directly as plain text, or you may use one of the Terraform functions to read in the contents of a file on disk, such as `file("/some/file/path.txt")` or `filebase64("/some/file/path.txt")`. If `generate_ssh_keys` is true, leave this blank or undefined for the mapped public and private key file `item`s, as any value specified here will be ignored, **BUT** flagged as a diff upon update. Likewise, if `generate_ssh_passphrase` is true, leave this blank or undefined for the mapped passphrase `item`. **WARNING**: Although this is a sensitive field and is masked in the Terraform CLI output, know that this value is available in plaintext in the Terraform state file. |
+| filename       | String             | Optional | The name to give a file when it is uploaded to the Thycotic server. Default value is `File.txt` if a name is not provided. This attribute is ignored if the field is not a file field.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| file_encoded   | Boolean            | Optional | Whether the contents of the file attachment have been Base64 encoded and should therefore be decoded by this plugin before posting the file contents to the Thycotic Secret Server. You should set this to `true` if you're using the Terraform `filebase64()` function to read in the contents of a file that is _not_ UTF-8 encoded, which is a requirement for the Terraform `file()` function. This attribute is ignored if this item is not a file item.                                                                                                                                                                                                                                                                                                                                   |
 
 ## Generated Password Resource
 

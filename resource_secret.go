@@ -6,6 +6,7 @@ import (
 	"github.com/hashicorp/terraform/helper/schema"
 	"github.com/thycotic/tss-sdk-go/server"
 	"log"
+	"regexp"
 	"strconv"
 )
 
@@ -166,6 +167,13 @@ func resourceSecretToModel(resourceSecret *schema.ResourceData, template *server
 	secret.SessionRecordingEnabled = resourceSecret.Get("session_recording_enabled").(bool)
 	secret.SiteID = resourceSecret.Get("site_id").(int)
 	secret.WebLauncherRequiresIncognitoMode = resourceSecret.Get("web_launcher_requires_incognito_mode").(bool)
+	generateSshKeys := resourceSecret.Get("generate_ssh_keys").(bool)
+	generateSshPassphrase := resourceSecret.Get("generate_ssh_passphrase").(bool)
+	if generateSshKeys || generateSshPassphrase {
+		secret.SshKeyArgs = &server.SshKeyArgs{GeneratePassphrase: generateSshPassphrase, GenerateSshKeys: generateSshKeys}
+	} else {
+		secret.SshKeyArgs = nil
+	}
 
 	// Iterate the configuration's item values and map them
 	// into the model's fields
@@ -260,6 +268,10 @@ func modelToResourceSecret(model *server.Secret, resourceSecret *schema.Resource
 	if err = resourceSecret.Set("session_recording_enabled", model.SessionRecordingEnabled); err != nil { return err }
 	if err = resourceSecret.Set("site_id", model.SiteID); err != nil { return err }
 	if err = resourceSecret.Set("web_launcher_requires_incognito_mode", model.WebLauncherRequiresIncognitoMode); err != nil { return err }
+	// Leave generate_ssh_keys and generate_ssh_passphrase as they are in the state.
+	// The server does not return these values in the response body. They are one-way
+	// parameters in the Thycotic API, appearing only in the request bodies of a Create
+	// Secret or Update Secret request.
 
 	resourceItems := resourceSecret.Get("item").([]interface{})
 	if model.Fields == nil {
@@ -365,6 +377,25 @@ func resourceSecret() *schema.Resource {
 				Optional:    true,
 				Default:     -1,
 			},
+			"generate_ssh_keys": {
+				Type: schema.TypeBool,
+				Description: "whether to generate an SSH public/private key pair for the secret. If true, the " +
+					"template for this secret must have extended mappings that support SSH keys. Also, the item " +
+					"value for the mapped file fields must be undeclared or empty in this configuration",
+				ForceNew: true,
+				Optional: true,
+				Default: false,
+			},
+			"generate_ssh_passphrase": {
+				Type: schema.TypeBool,
+				Description: "whether to generate a passphrase to protect the SSH private key. If true, " +
+					"generate_ssh_keys must also be true, and the template for this secret must have extended " +
+					"mappings that support SSH keys. Finally, the item value for the mapped field must be " +
+					"undeclared or empty in this configuration",
+				ForceNew: true,
+				Optional: true,
+				Default: false,
+			},
 			"item": {
 				Type:        schema.TypeList,
 				Description: "array of values for the fields defined in the secret template",
@@ -383,8 +414,14 @@ func resourceSecret() *schema.Resource {
 							Description: "the value for the field. If this item is a file item, you may provide " +
 								"the contents of the file here directly as plain text, or you may use one of the " +
 								"Terraform functions to read in the contents of a file on disk, such as " +
-								"'file(\"/some/file/path.txt\")' or 'filebase64(\"/some/file/path.txt\")'",
-							Required:    true,
+								"'file(\"/some/file/path.txt\")' or 'filebase64(\"/some/file/path.txt\")'. If " +
+								"'generate_ssh_keys' is true, leave this blank or undefined for the mapped public " +
+								"and private key file items, as any value specified here will be ignored, . Likewise, " +
+								"if 'generate_ssh_passphrase' is true, leave this blank or undefined for the mapped " +
+								"passphrase item, as any value specified here will be ignored upon creation, *BUT* " +
+								"flagged as a diff upon update",
+							Optional:    true,
+							Computed:    true,
 							Sensitive:   true,
 						},
 						"filename": {
@@ -394,6 +431,7 @@ func resourceSecret() *schema.Resource {
 								"provided here. Keep in mind that the Thycotic Secret Server has a configurable " +
 								"list of acceptable filename extensions, and this filename must comply with that list",
 							Optional:    true,
+							Computed:    true,
 						},
 						"file_encoded": {
 							Type:        schema.TypeBool,
@@ -448,6 +486,42 @@ func resourceSecret() *schema.Resource {
 							Computed:    true,
 						},
 					},
+				},
+				DiffSuppressFunc: func(key, old, new string, resourceSecret *schema.ResourceData) bool {
+					if old == new { return true }
+
+					generateSshKeys := resourceSecret.Get("generate_ssh_keys").(bool)
+					generateSshPassphrase := resourceSecret.Get("generate_ssh_passphrase").(bool)
+					if generateSshKeys || generateSshPassphrase {
+						// If the user is generating SSH keys or passphrases, it's not necessary
+						// for them to declare items on their secret resources for the public and
+						// private key fields, or for the passphrase field. If they choose not to,
+						// there will be state differences for the "field" attribute on those
+						// undeclared items. The "old" value will have the field name since it is
+						// returned by the server after POST and PUT operations and saved off in
+						// the state. The "new" value, however, will remain empty as long as it's
+						// undeclared in the configuration. When this happens, print off a warning
+						// for the Terraform logs, and return "true" to indicate nothing's changed.
+						if match, _ := regexp.Match("^item\\.\\d+\\.field$", []byte(key)); match {
+							if new == "" {
+								log.Printf("[WARN] ignoring state differences for the '%s' item on the secret " +
+									"named '%s' since SSH generation is enabled", old, resourceSecret.Get("name"))
+								return true
+							}
+						}
+						// For the same reasons as above, ignore the state differences between the
+						// old number of "item" blocks and the new number.
+						if key == "item.#" {
+							numOldItems, oldErr := strconv.Atoi(old)
+							numNewItems, newErr := strconv.Atoi(new)
+							if oldErr == nil && newErr == nil && numNewItems < numOldItems {
+								log.Printf("[WARN] ignoring state differences between the number of items on " +
+									"the secret named '%s' since SSH generation is enabled", resourceSecret.Get("name"))
+								return true
+							}
+						}
+					}
+					return false
 				},
 			},
 			"active": {
