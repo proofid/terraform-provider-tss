@@ -101,6 +101,10 @@ func resourceSecretUpdate(resourceSecret *schema.ResourceData, meta interface{})
 		return err
 	}
 
+	// Key generation is only supported when the secret is created. Passing
+	// key args into the UpdateSecret method will cause an error
+	secretModel.SshKeyArgs = nil
+
 	secret, err := tss.UpdateSecret(*secretModel)
 	if err != nil {
 		log.Printf("[ERROR] unable to update secret: %s", err)
