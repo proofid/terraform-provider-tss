@@ -5,6 +5,6 @@ require (
 	github.com/thycotic/tss-sdk-go v1.0.0
 )
 
-// replace github.com/thycotic/tss-sdk-go => ../tss-sdk-go
+replace github.com/thycotic/tss-sdk-go => ../tss-sdk-go
 
 go 1.13
